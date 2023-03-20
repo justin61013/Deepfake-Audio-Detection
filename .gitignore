@@ -1,0 +1,7 @@
+__pycache__/
+*.DS_Store
+data/
+data_set/
+*.zip
+*.pth
+*.pt
