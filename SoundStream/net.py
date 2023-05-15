@@ -157,8 +157,7 @@ class SoundStream(nn.Module):
         e = self.encoder(x)
         quantized, _, _ = self.quantizer(e)
         o = self.decoder(quantized)
-        # print(o.shape)
-        # o = self.decoder(e)
+        
         return o
 
 # Wave-based Discriminator
