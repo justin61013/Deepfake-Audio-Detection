@@ -7,7 +7,8 @@ from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import random
 import glob
-
+from moviepy.editor import AudioFileClip
+import librosa
 
 
 class ASVspoofDataset(Dataset):
@@ -133,4 +134,40 @@ class ASVspoofDataset_mix(Dataset):
         elif current_length > self.max_length:
             waveform = waveform[:, :self.max_length]
         return waveform
+
+
+
+class AudioDataset(Dataset):
+    def __init__(self, directory, transform=None):
+        self.directory = directory
+        self.transform = transform
+        self.file_list = [f for f in os.listdir(directory) if f.endswith(".mp4")]
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, idx):
+        video_file = self.file_list[idx]
+        video_path = os.path.join(self.directory, video_file)
+
+        # Extract audio from video
+        audio = AudioFileClip(video_path)
+        audio_path = video_path.split('.')[0] + '.wav'
+        audio.write_audiofile(audio_path)
+        
+        # Load audio as a waveform `y` and sampling rate `sr`
+        y, sr = librosa.load(audio_path)
+
+        # Assign label based on file name
+        if 'real' in video_file:
+            label = 0
+        elif 'fake' in video_file:
+            label = 1
+        else:
+            label = -1  # assign a default label or throw an error
+
+        if self.transform:
+            y = self.transform(y)
+
+        return y, sr, label
 

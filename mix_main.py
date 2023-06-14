@@ -5,27 +5,32 @@ from torch.utils.data import DataLoader
 from ASVspoofDataset import ASVspoofDataset, ASVspoofDataset_mix
 from net import Model1, SoundStream, Model2, Model3
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
+
 
 # Hyperparameters
 C = 1
 D = 1
 hidden_units = 128
-learning_rate = 0.0005
+learning_rate = 0.0002
 batch_size = 32
 num_epochs = 180
 max_length = 80000
 
-
+model_name = "model8"
 # Set device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
-class_weights = torch.tensor([8.0, 1.0]).to(device)
+class_weights = torch.tensor([1.5, 1.0]).to(device)
 
 
 # Load dataset
 train_data_path = r"dataset\ASVspoof\train\audio"
 train_protocol_file = r'dataset\ASVspoof\ASVspoof2019.LA.cm.train.trn.txt'
-train_dataset = ASVspoofDataset_mix(train_data_path, train_protocol_file, max_length, additional_data_path=r'dataset\additional')
+train_dataset = ASVspoofDataset_mix(train_data_path, train_protocol_file, max_length)
 
 dev_data_path = r"dataset\ASVspoof\valid\audio"
 dev_protocol_file = r"dataset\ASVspoof\ASVspoof2019.LA.cm.dev.trl.txt"
@@ -55,14 +60,19 @@ new_model.encoder.load_state_dict(pretrained_model.encoder.state_dict())
 # new_model.quantizer.load_state_dict(pretrained_model.quantizer.state_dict())
 
 # criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = nn.BCEWithLogitsLoss()
+criterion = nn.BCEWithLogitsLoss(weight=class_weights)
 
 
 optimizer = optim.Adam(new_model.parameters(), lr=learning_rate)
 
+train_losses = []
+eval_losses = []
+
+
 # Training loop
 for epoch in tqdm(range(num_epochs)):
     new_model.train()
+    running_loss = 0
     for batch_idx, (data, targets, original_targets) in enumerate(train_loader):
         data, targets = data.to(device), targets.to(device)
         
@@ -70,14 +80,19 @@ for epoch in tqdm(range(num_epochs)):
         logits  = new_model(data)
 
         loss = criterion(logits, targets)
+        running_loss += loss.item() * data.size(0)
 
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
+    epoch_loss = running_loss / len(train_loader.dataset)
+    train_losses.append(epoch_loss)
+
     # Evaluate on evaluation set
     new_model.eval()
+    running_eval_loss = 0
     with torch.no_grad():
         correct = 0
         total = 0
@@ -109,28 +124,45 @@ for epoch in tqdm(range(num_epochs)):
                         real_false += 1
                     else:
                         soft_label += 1
+                loss = criterion(scores, soft_targets)
+
+                running_eval_loss += loss.item() * data.size(0)
+    
+            eval_loss = running_eval_loss / len(dev_loader.dataset)
+            eval_losses.append(eval_loss)
 
         accuracy = correct / total
         print(f"Epoch [{epoch+1}/{num_epochs}], Evaluation Accuracy: {accuracy:.4f}")
         print(f"fake_correct: {fake_correct}, real_correct: {real_correct}, fake_false: {fake_false}, real_false: {real_false}")
 
-# Save model
-torch.save(new_model.state_dict(), "weight/trained_model7.pth")
+torch.save(new_model.state_dict(), "weight/trained_"+model_name+".pth")
+
+
+plt.plot(train_losses, label='Training Loss')
+plt.plot(eval_losses, label='Evaluation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Evaluation Loss Curves')
+plt.legend()
+
+# Save the figure
+plt.savefig('loss_curves/'+model_name+'.png', dpi=300)
 
 # Evaluate on development (dev) set
-# new_model.load_state_dict(torch.load("weight/trained_model4.pth"))
-# new_model.eval()
-# with torch.no_grad():
-#     correct = 0
-#     total = 0
-#     for data, targets in eval_loader:
-#         data, targets = data.to(device), targets.to(device)
-#         scores = new_model(data)
-#         predictions = torch.argmax(scores, dim=1)
-#         correct += (predictions == targets).sum().item()
-#         total += targets.size(0)
+new_model.load_state_dict(torch.load("weight/trained_"+model_name+".pth"))
+new_model.eval()
+with torch.no_grad():
+    correct = 0
+    total = 0
+    for data, targets in eval_loader:
+        data, targets = data.to(device), targets.to(device)
+        scores = new_model(data)
+        predictions = torch.argmax(scores, dim=1)
+        correct += (predictions == targets).sum().item()
+        total += targets.size(0)
 
-#     accuracy = correct / total
-#     print(f"Development Set Accuracy: {accuracy:.4f}")
+    accuracy = correct / total
+    print(f"Development Set Accuracy: {accuracy:.4f}")
 
+    
 
